@@ -1,5 +1,5 @@
 library(dbarts)
-library(PROC)
+library(pROC)
 
 cancer <- read.csv("C:/Users/pyk/Desktop/nus/RA/project/imodels-data-master/data_cleaned/breast_cancer.csv")
 x <- cancer[,-18]
