@@ -34,6 +34,7 @@ grid_search_bart <- function(train_x,train_y,test_x,test_y, num_trees_grid, alph
         time <- bart_model$time_to_build
         
         pred <- predict(bart_model,test_x)
+        y_pred <-  ifelse(pred > 0.5, 1, 0)
         
         
         roc_result <- roc(test_y, pred)
