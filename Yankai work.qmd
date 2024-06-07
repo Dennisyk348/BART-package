@@ -88,15 +88,17 @@ bart_package <- function(train_x,train_y,test_x,test_y,package,repeat_time,
       }
       
       if(package_name=="SoftBart"){
-        t <- ({bart_model <- softbart(X = train_x, Y = train_y, X_test = test_x, 
+        t <- system.time({bart_model <- softbart(X = train_x, Y = train_y, X_test = test_x, 
                             hypers = Hypers(train_x, train_y, num_tree = num_trees, gamma = alpha,beta = beta),
                             opts = Opts(num_burn = 200, num_save = 1000, update_tau = TRUE))})
+        #print(t)
         e_time <- as.numeric(t["elapsed"])
+        #print(e_time)
         predictions <- bart_model$y_hat_test_mean
         mse_score <- mean((test_y - predictions)^2)
         time_SB[i] <- e_time
         mse_SB[i] <- mse_score
-        
+        #print(1)
       }
     }
   }
@@ -145,3 +147,28 @@ bart_package <- function(train_x,train_y,test_x,test_y,package,repeat_time,
   return(results)
 }
 ```
+
+```{r}
+set.seed(316)
+cancer <- read.csv("C:/Users/pyk/Desktop/nus/RA/project/imodels-data-master/data_cleaned/breast_cancer.csv")
+x <- cancer[,-18]
+y <- cancer[,18]
+
+train_indices <- createDataPartition(y, p = 0.8, list = FALSE)
+train_x <- x[train_indices, ]
+test_x <- x[-train_indices, ]
+train_y <- y[train_indices]
+test_y <- y[-train_indices]
+
+p <- c("BART","dbarts","bartMachine","SoftBart")
+```
+
+```{r}
+
+fit <- bart_package(train_x,train_y,test_x,test_y,package = p,repeat_time = 3,
+                    num_trees = 20,alpha = 0.95,beta = 2)
+```
+```{r}
+print(fit)
+```
+
