@@ -6,10 +6,7 @@ editor: visual
 
 ## library package
 
-```{r}
-#| message: FALSE
-#| echo: FALSE
-library(pROC)
+```{r, warning=FALSE,echo=FALSE,message=FALSE}
 library(bartMachine)
 library(caret)
 library(dbarts)
@@ -163,7 +160,7 @@ test_y <- y[-train_indices]
 p <- c("BART","dbarts","bartMachine","SoftBart")
 ```
 
-```{r}
+```{r, results='hide'}
 
 fit <- bart_package(train_x,train_y,test_x,test_y,package = p,repeat_time = 3,
                     num_trees = 20,alpha = 0.95,beta = 2)
@@ -172,3 +169,4 @@ fit <- bart_package(train_x,train_y,test_x,test_y,package = p,repeat_time = 3,
 print(fit)
 ```
 
+The mean reason causes different in MSE_mean is for bartMachine and SoftBart package, the predict function in it only provides the predicted value i.e. probability instead of posterior mean, one possible method to deal this is to try inverse sigmoid function to trace it back.
