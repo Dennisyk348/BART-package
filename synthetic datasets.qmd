@@ -1,0 +1,86 @@
+---
+title: "synthetic datasets"
+format: pdf
+editor: visual
+---
+
+```{r}
+#| message: FALSE
+#| echo: FALSE
+library(simChef)
+library(bartMachine)
+library(dbarts)
+library(SoftBart)
+library(BART)
+library(e1071)
+library(bench)
+```
+## create dataset
+```{r}
+linear_dgp_fun <- function(n_train, n_test, p, beta, noise_sd) {
+  n <- n_train + n_test
+  X <- matrix(rnorm(n * p), nrow = n, ncol = p)
+  y <- X %*% beta + rnorm(n, sd = noise_sd)
+  data_list <- list(
+    X_train = X[1:n_train, , drop = FALSE],
+    y_train = y[1:n_train],
+    X_test = X[(n_train + 1):n, , drop = FALSE],
+    y_test = y[(n_train + 1):n]
+  )
+  return(data_list)
+}
+linear_dgp <- create_dgp(
+  .dgp_fun = linear_dgp_fun, .name = "Linear DGP",
+  # additional named parameters to pass to .dgp_fun()
+  n_train = 350, n_test = 120, p = 4, beta = c(1,2,1.5,3), noise_sd = 1
+)
+```
+
+## build BART model
+```{r}
+BART_fun <- function(X_train, y_train, X_test, y_test, num_trees,alpha,beta) {
+  train_df <- dplyr::bind_cols(data.frame(X_train), y = y_train)
+  t <- bench::mark(fit <- pbart(x.train = X_train,
+                                       y.train = y_train,
+                                       x.test = X_test,
+                                       ntree = num_trees,
+                                       base = alpha,
+                                       power = beta))
+  time <- mean(t$time[[1]])
+  predictions <- colMeans(fit$yhat.test)
+  mse_score <- mean((y_test - predictions)^2)
+  
+  return(list(time = time, mse = mse_score))
+}
+```
+
+```{r,results='hide'}
+
+
+BART <- create_method(
+  .method_fun = BART_fun, .name = "BART", 
+  # additional named parameters to pass to .method_fun()
+  num_trees=20,alpha=0.95,beta=2
+)
+
+# Create experiment
+experiment <- create_experiment(name = "Test Experiment") %>%
+  add_dgp(linear_dgp) %>%
+
+  add_method(BART) %>%
+
+  # vary across noise parameter in linear dgp
+  add_vary_across(
+    .dgp = "Linear DGP",
+    noise_sd = c(0.1, 0.5, 1, 2)
+  )
+
+results <- run_experiment(experiment, n_reps = 4, save = TRUE)
+
+# Render automated documentation and view results
+#render_docs(experiment)
+```
+
+```{r}
+results$fit_results
+```
