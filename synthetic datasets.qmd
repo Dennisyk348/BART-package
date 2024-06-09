@@ -16,6 +16,7 @@ library(e1071)
 library(bench)
 ```
 ## create dataset
+
 ```{r}
 linear_dgp_fun <- function(n_train, n_test, p, beta, noise_sd) {
   n <- n_train + n_test
@@ -39,10 +40,11 @@ linear_dgp <- create_dgp(
 ## build BART model
 ```{r}
 BART_fun <- function(X_train, y_train, X_test, y_test, num_trees,alpha,beta) {
-  train_df <- dplyr::bind_cols(data.frame(X_train), y = y_train)
-  t <- bench::mark(fit <- pbart(x.train = X_train,
+  train_X <- data.frame(X_train)
+  test_X <- data.frame(X_test)
+  t <- bench::mark(fit <- wbart(x.train = train_X,
                                        y.train = y_train,
-                                       x.test = X_test,
+                                       x.test = test_X,
                                        ntree = num_trees,
                                        base = alpha,
                                        power = beta))
@@ -50,9 +52,74 @@ BART_fun <- function(X_train, y_train, X_test, y_test, num_trees,alpha,beta) {
   predictions <- colMeans(fit$yhat.test)
   mse_score <- mean((y_test - predictions)^2)
   
-  return(list(time = time, mse = mse_score))
+  return(list(time = time, mse=mse_score,y_test=y_test,predictions=predictions))
 }
+
+dbarts_fun <- function(X_train, y_train, X_test, y_test, num_trees,alpha,beta){
+  train_X <- data.frame(X_train)
+  test_X <- data.frame(X_test)
+  t <- bench::mark(bart_model <- bart(x.train = train_X,
+                                       y.train = y_train,
+                                       x.test = test_X,
+                                       ntree = num_trees,
+                                       base = alpha,
+                                       power = beta))
+  time <- mean(t$time[[1]])
+  predictions <- colMeans(bart_model$yhat.test)
+  mse_score <- mean((y_test - predictions)^2)
+  
+  return(list(time = time, mse=mse_score,y_test=y_test,predictions=predictions))
+}
+
+bartMachine_fun <- function(X_train, y_train, X_test,y_test,num_trees,alpha,beta){
+  train_X <- data.frame(X_train)
+  test_X <- data.frame(X_test)
+  bart_model <- bartMachine(
+          X = train_X,
+          y = y_train,
+          num_trees = num_trees,
+          beta = beta,
+          alpha = alpha
+          
+        )
+        # The value of calculating the time required for modeling
+  time <- bart_model$time_to_build
+  predictions <- predict(bart_model,test_X,type = "prob")
+  mse_score <- mean((y_test - predictions)^2)
+  
+  return(list(time = time, mse=mse_score,y_test=y_test,predictions=predictions))
+}
+
+SoftBart_fun<- function(X_train, y_train, X_test,y_test,num_trees,alpha,beta){
+  train_X <- data.frame(X_train)
+  test_X <- data.frame(X_test)
+  t <-  bench::mark({bart_model <- softbart(X = train_X, Y = y_train, X_test = test_X, hypers = Hypers(train_X, y_train, num_tree = num_trees, gamma = alpha,beta = beta),opts = Opts(num_burn = 200, num_save = 1000, update_tau = TRUE))})
+        #print(t)
+  time <- mean(t$time[[1]])
+  predictions <- bart_model$y_hat_test_mean
+  mse_score <- mean((y_test - predictions)^2)
+  
+  return(list(time = time, mse=mse_score,y_test=y_test,predictions=predictions))
+}
+
 ```
+## create evaluation
+
+```{r}
+posterior_mse <- function(fit_results,truth_col,estimate_col){
+  y_test = fit_results$truth_col
+  pred = fit_results$estimate_col
+  return(mean((y_test - pred)^2))
+}
+
+pred_err <- create_evaluator(
+  .eval_fun = posterior_mse, .name = 'Posterior MSE',
+  # additional named parameters to pass to .eval_fun()
+  truth_col = "y_test", estimate_col = "predictions"
+) 
+
+```
+
 
 ```{r,results='hide'}
 
@@ -60,21 +127,25 @@ BART_fun <- function(X_train, y_train, X_test, y_test, num_trees,alpha,beta) {
 BART <- create_method(
   .method_fun = BART_fun, .name = "BART", 
   # additional named parameters to pass to .method_fun()
-  num_trees=20,alpha=0.95,beta=2
+  num_trees=50,alpha=0.95,beta=2
 )
-
+dbarts <- create_method(.method_fun = dbarts_fun,.name = "dbarts",
+                        num_trees=50,alpha=0.95,beta=2)
+bartMachine <- create_method(.method_fun = bartMachine_fun,.name = "bartMachine",
+                        num_trees=50,alpha=0.95,beta=2)
+SoftBart <- create_method(.method_fun = SoftBart_fun,.name = "SoftBart",
+                        num_trees=50,alpha=0.95,beta=2)
 # Create experiment
 experiment <- create_experiment(name = "Test Experiment") %>%
   add_dgp(linear_dgp) %>%
-
+  add_method(dbarts) %>%
   add_method(BART) %>%
+  add_method(bartMachine) %>%
+  add_method(SoftBart) %>%
+  add_evaluator(pred_err)
 
-  # vary across noise parameter in linear dgp
-  add_vary_across(
-    .dgp = "Linear DGP",
-    noise_sd = c(0.1, 0.5, 1, 2)
-  )
 
+  
 results <- run_experiment(experiment, n_reps = 4, save = TRUE)
 
 # Render automated documentation and view results
