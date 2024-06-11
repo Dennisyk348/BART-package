@@ -1,0 +1,187 @@
+---
+title: "parameter search"
+format: pdf
+editor: visual
+---
+
+```{r, warning=FALSE,echo=FALSE,message=FALSE}
+library(bartMachine)
+library(caret)
+library(dbarts)
+library(SoftBart)
+library(BART)
+library(e1071)
+library(bench)
+```
+## load data
+
+```{r}
+cancer <- read.csv("C:/Users/pyk/Desktop/nus/RA/project/imodels-data-master/data_cleaned/breast_cancer.csv")
+X <- cancer[,-18]
+y <- cancer[,18]
+
+```
+
+```{r,results='hide'}
+set.seed(316)
+num_trees_grid <- c(20,50,100)
+alpha_grid <- c(0.8,0.95,0.98)
+beta_grid <- c(1.5,2,3)
+k_folds <- 5  # Number of folds for cross-validation
+
+folds <- cut(seq(1, nrow(cancer)), breaks=k_folds, labels=FALSE)
+
+# Store results
+results <- expand.grid(num_trees=num_trees_grid, alpha = alpha_grid,
+                       beta= beta_grid,MSE=rep(NA, 1))
+
+a <- 0
+# Perform grid search
+for(i in seq_along(num_trees_grid)) {
+  num_trees <- num_trees_grid[i]
+  for (k in seq_along(alpha_grid)) {
+    base <- alpha_grid[k]
+    for (b in seq_along(alpha_grid)) {
+      power <- beta_grid[b]
+      mse_values <- numeric(k_folds)
+      a <- a+1
+      for(j in 1:k_folds) {
+        test_indices <- which(folds == j)
+        train_indices <- setdiff(1:nrow(X), test_indices)
+    
+        model <- dbarts::bart(X[train_indices, ], y[train_indices],X[test_indices,], ntree=num_trees,base = base,power = power)
+        predictions <- colMeans(model$yhat.test)
+    
+        mse_values[j] <- mean((predictions - y[test_indices])^2)
+        
+      }
+      results$MSE[a] <- mean(mse_values)
+    }
+  }
+  
+}
+
+# Print results
+
+```
+
+```{r}
+print(results)
+```
+
+```{r}
+value <- min(results$MSE)
+position <- which(results$MSE == value)
+print(results[position,])
+```
+```{r}
+ctyc <- read.csv("C:/Users/pyk/Desktop/nus/RA/project/imodels-data-master/data_cleaned/compas_two_year_clean.csv")
+x_ctyc <- ctyc[,-21]
+y_ctyc <- ctyc[,21]
+```
+
+```{r,results='hide'}
+set.seed(316)
+num_trees_grid <- c(50,100,200)
+alpha_grid <- c(0.8,0.95,0.98)
+beta_grid <- c(1.5,2,3)
+k_folds <- 5  # Number of folds for cross-validation
+
+folds <- cut(seq(1, nrow(ctyc)), breaks=k_folds, labels=FALSE)
+
+# Store results
+results <- expand.grid(num_trees=num_trees_grid, alpha = alpha_grid,
+                       beta= beta_grid,MSE=rep(NA, 1))
+
+a <- 0
+# Perform grid search
+for(i in seq_along(num_trees_grid)) {
+  num_trees <- num_trees_grid[i]
+  for (k in seq_along(alpha_grid)) {
+    base <- alpha_grid[k]
+    for (b in seq_along(alpha_grid)) {
+      power <- beta_grid[b]
+      mse_values <- numeric(k_folds)
+      a <- a+1
+      for(j in 1:k_folds) {
+        test_indices <- which(folds == j)
+        train_indices <- setdiff(1:nrow(x_ctyc), test_indices)
+    
+        model <- dbarts::bart(x_ctyc[train_indices, ], y_ctyc[train_indices],x_ctyc[test_indices,], ntree=num_trees,base = base,power = power)
+        predictions <- colMeans(model$yhat.test)
+    
+        mse_values[j] <- mean((predictions - y_ctyc[test_indices])^2)
+        
+      }
+      results$MSE[a] <- mean(mse_values)
+    }
+  }
+  
+}
+```
+
+```{r}
+# Print results
+print(results)
+```
+```{r}
+value <- min(results$MSE)
+position <- which(results$MSE == value)
+print(results[position,])
+```
+
+```{r}
+heart <- read.csv("C:/Users/pyk/Desktop/nus/RA/project/imodels-data-master/data_cleaned/heart.csv")
+x_h <- heart[,-16]
+y_h <- heart[,16]
+```
+
+```{r,results='hide'}
+set.seed(316)
+num_trees_grid <- c(50,100,20)
+alpha_grid <- c(0.8,0.95,0.98)
+beta_grid <- c(1.5,2,3)
+k_folds <- 5  # Number of folds for cross-validation
+
+folds <- cut(seq(1, nrow(heart)), breaks=k_folds, labels=FALSE)
+
+# Store results
+results <- expand.grid(num_trees=num_trees_grid, alpha = alpha_grid,
+                       beta= beta_grid,MSE=rep(NA, 1))
+
+a <- 0
+# Perform grid search
+for(i in seq_along(num_trees_grid)) {
+  num_trees <- num_trees_grid[i]
+  for (k in seq_along(alpha_grid)) {
+    base <- alpha_grid[k]
+    for (b in seq_along(alpha_grid)) {
+      power <- beta_grid[b]
+      mse_values <- numeric(k_folds)
+      a <- a+1
+      for(j in 1:k_folds) {
+        test_indices <- which(folds == j)
+        train_indices <- setdiff(1:nrow(x_h), test_indices)
+    
+        model <- dbarts::bart(x_h[train_indices, ], y_h[train_indices],x_h[test_indices,], ntree=num_trees,base = base,power = power)
+        predictions <- colMeans(model$yhat.test)
+    
+        mse_values[j] <- mean((predictions - y_ctyc[test_indices])^2)
+        
+      }
+      results$MSE[a] <- mean(mse_values)
+    }
+  }
+  
+}
+
+# Print results
+```
+```{r}
+print(results)
+```
+```{r}
+value <- min(results$MSE)
+position <- which(results$MSE == value)
+print(results[position,])
+```
