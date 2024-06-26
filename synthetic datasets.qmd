@@ -8,12 +8,15 @@ editor: visual
 #| message: FALSE
 #| echo: FALSE
 library(simChef)
+library(dplyr)
 library(bartMachine)
 library(dbarts)
 library(SoftBart)
 library(BART)
 library(e1071)
 library(bench)
+library(randomForest)
+library(caret)
 ```
 ## create dataset
 
@@ -35,6 +38,32 @@ linear_dgp <- create_dgp(
   # additional named parameters to pass to .dgp_fun()
   n_train = 350, n_test = 120, p = 4, beta = c(1,2,1.5,3), noise_sd = 1
 )
+
+dataset_dgp_fun <- function(datasetname){
+  
+  address <- "C:/Users/pyk/Desktop/nus/RA/project/imodels-data-master/data_cleaned/"
+  file <- paste0(datasetname,".csv")
+  file_path <- paste0(address,file)
+  df <- read.csv(file_path)
+  x <- df[, -ncol(df)]
+  y <- df[, ncol(df)]
+
+  train_indices <- createDataPartition(y, p = 0.8, list = FALSE)
+
+  data_list <- list(
+    X_train <- x[train_indices, ],
+    y_train <- y[train_indices],
+    X_test <- x[-train_indices, ],
+    y_test <- y[-train_indices]
+  )
+  return(data_list)
+}
+dataset_dgp <- create_dgp(.dgp_fun = dataset_dgp_fun,.name = 'heart',
+                          datasetname = "heart")
+```
+
+```{r}
+linear_dgp
 ```
 
 ## build BART model
@@ -53,7 +82,7 @@ BART_fun <- function(X_train, y_train, X_test, y_test, df,k,q) {
   predictions <- colMeans(fit$yhat.test)
   mse_score <- mean((y_test - predictions)^2)
   
-  return(list(time = time, mse=mse_score,y_test=y_test,predictions=predictions))
+  return(list(time = time, mse=mse_score))
 }
 
 dbarts_fun <- function(X_train, y_train, X_test, y_test, df,k,q){
@@ -69,7 +98,7 @@ dbarts_fun <- function(X_train, y_train, X_test, y_test, df,k,q){
   predictions <- colMeans(bart_model$yhat.test)
   mse_score <- mean((y_test - predictions)^2)
   
-  return(list(time = time, mse=mse_score,y_test=y_test,predictions=predictions))
+  return(list(time = time, mse=mse_score))
 }
 
 bartMachine_fun <- function(X_train, y_train, X_test,y_test,df,k,q){
@@ -86,7 +115,7 @@ bartMachine_fun <- function(X_train, y_train, X_test,y_test,df,k,q){
   predictions <- predict(bart_model,test_X,type = "prob")
   mse_score <- mean((y_test - predictions)^2)
   
-  return(list(time = time, mse=mse_score,y_test=y_test,predictions=predictions))
+  return(list(time = time, mse=mse_score))
 }
 
 SoftBart_fun<- function(X_train, y_train, X_test,y_test,num_trees,alpha,beta){
@@ -98,9 +127,17 @@ SoftBart_fun<- function(X_train, y_train, X_test,y_test,num_trees,alpha,beta){
   predictions <- bart_model$y_hat_test_mean
   mse_score <- mean((y_test - predictions)^2)
   
-  return(list(time = time, mse=mse_score,y_test=y_test,predictions=predictions))
+  return(list(time = time, mse=mse_score))
 }
-
+RF_fun <- function(X_train, y_train, X_test,y_test){
+  train_X <- data.frame(X_train)
+  test_X <- data.frame(X_test)
+  t <- bench::mark({rf_model <- randomForest(x=train_X, y=y_train)})
+  time <- mean(t$time[[1]])
+  predictions <- predict(rf_model, test_X)
+  mse_score <- mean((y_test - predictions)^2)
+  return(list(time = time, mse=mse_score))
+}
 ```
 ## create evaluation
 
@@ -134,13 +171,16 @@ bartMachine <- create_method(.method_fun = bartMachine_fun,.name = "bartMachine"
                         k=2.5,q=0.95,df=4)
 SoftBart <- create_method(.method_fun = SoftBart_fun,.name = "SoftBart",
                         num_trees=50,alpha=0.95,beta=2)
+RF <- create_method(.method_fun = RF_fun,.name = "RandomForest")
 # Create experiment
 experiment <- create_experiment(name = "Test Experiment") %>%
   add_dgp(linear_dgp) %>%
+  add_dgp(dataset_dgp) %>%
   add_method(dbarts) %>%
   add_method(BART) %>%
   add_method(bartMachine) %>%
   add_method(SoftBart) %>%
+  add_method(RF)%>%
   add_evaluator(pred_err)
 
 
@@ -152,174 +192,33 @@ results <- run_experiment(experiment, n_reps = 4, save = TRUE)
 ```
 
 ```{r}
-results$fit_results
+result <- results$fit_results
+result
 ```
 
 ```{r}
-gain_summary <- function(repeat_time, results_table){
-  
-  result <- data.frame()
-  time_BART <- c()
-  mse_BART <- c()
-  time_dbarts <- c()
-  mse_dbarts <- c()
-  time_BM <- c()
-  mse_BM <- c()
-  time_SB <- c()
-  mse_SB <- c()
-  
-  for (i in 1:repeat_time) {
-    if(results_table$.method_name[4*i-3]=="BART" &&
-       as.numeric(results_table$.rep)[4*i-3]==i){
-      time_BART[i] <- results_table$time[[4*i-3]]
-      mse_BART[i] <- results_table$mse[4*i-3]
-    }
-    if(results_table$.method_name[4*i-2]=="SoftBart"&&
-       as.numeric(results_table$.rep)[4*i-2]==i){
-      time_SB[i] <- results_table$time[[4*i-2]]
-      mse_SB[i] <- results_table$mse[4*i-2]
-    }
-    if(results_table$.method_name[4*i-1]=="bartMachine"&&
-       as.numeric(results_table$.rep)[4*i-1]==i){
-      time_BM[i] <- results_table$time[[4*i-1]]
-      mse_BM[i] <- results_table$mse[4*i-1]
-    }
-    if(results_table$.method_name[4*i]=="dbarts"&&
-       as.numeric(results_table$.rep)[4*i]==i){
-      time_dbarts[i] <- results_table$time[[4*i]]
-      mse_dbarts[i] <- results_table$mse[4*i]
-    }
-  }
-  row_BART <- data.frame(MSE_mean = mean(mse_BART), MSE_se = sd(mse_BART),
-                         running_time_mean = mean(time_BART),
-                         running_time_sd = sd(time_BART),
-                         package_name = "BART")
-  row_SB <- data.frame(MSE_mean = mean(mse_SB), MSE_se = sd(mse_SB),
-                         running_time_mean = mean(time_SB),
-                         running_time_sd = sd(time_SB),
-                         package_name = "SoftBart")
-  row_BM <- data.frame(MSE_mean = mean(mse_BM), MSE_se = sd(mse_BM),
-                         running_time_mean = mean(time_BM),
-                         running_time_sd = sd(time_BM),
-                         package_name = "bartMachine")
-  row_dbarts <- data.frame(MSE_mean = mean(mse_dbarts), MSE_se = sd(mse_dbarts),
-                         running_time_mean = mean(time_dbarts),
-                         running_time_sd = sd(time_dbarts),
-                         package_name = "dbarts")
-  result <- rbind(result,row_BART)
-  result <- rbind(result,row_SB)
-  result <- rbind(result,row_BM)
-  result <- rbind(result,row_dbarts)
-  return(result)
 
-}
+result$time_numeric <- as.numeric(result$time)
 
 ```
-
 
 ```{r}
+result$Resource <- paste(result$.dgp_name, result$.method_name, sep="_")
 
-summary <- gain_summary(repeat_time = 4,results_table = results$fit_results)
-summary
-```
+# Calculate MSE for each group
+summary <- result %>%
+  group_by(Resource) %>%
+  summarise(
+    Mean_MSE = mean(mse),
+    Var_MSE = sd(mse),
+    Mean_time = mean(time_numeric),
+    Var_time = sd(time_numeric))
 
-
-```{r}
-BART_fun <- function(X_train, y_train, X_test, y_test, num_trees,alpha,beta) {
-  train_X <- data.frame(X_train)
-  test_X <- data.frame(X_test)
-  t <- system.time(fit <- wbart(x.train = train_X,
-                                       y.train = y_train,
-                                       x.test = test_X,
-                                       ntree = num_trees,
-                                       base = alpha,
-                                       power = beta))
-  time <- as.numeric(t["elapsed"])
-  predictions <- colMeans(fit$yhat.test)
-  mse_score <- mean((y_test - predictions)^2)
-  
-  return(list(time = time, mse=mse_score,y_test=y_test,predictions=predictions))
-}
-
-dbarts_fun <- function(X_train, y_train, X_test, y_test, num_trees,alpha,beta){
-  train_X <- data.frame(X_train)
-  test_X <- data.frame(X_test)
-  t <- system.time(bart_model <- bart(x.train = train_X,
-                                       y.train = y_train,
-                                       x.test = test_X,
-                                       ntree = num_trees,
-                                       base = alpha,
-                                       power = beta))
-  time <- as.numeric(t["elapsed"])
-  predictions <- colMeans(bart_model$yhat.test)
-  mse_score <- mean((y_test - predictions)^2)
-  
-  return(list(time = time, mse=mse_score,y_test=y_test,predictions=predictions))
-}
-
-bartMachine_fun <- function(X_train, y_train, X_test,y_test,num_trees,alpha,beta){
-  train_X <- data.frame(X_train)
-  test_X <- data.frame(X_test)
-  bart_model <- bartMachine(
-          X = train_X,
-          y = y_train,
-          num_trees = num_trees,
-          beta = beta,
-          alpha = alpha
-          
-        )
-        # The value of calculating the time required for modeling
-  time <- bart_model$time_to_build
-  predictions <- predict(bart_model,test_X,type = "prob")
-  mse_score <- mean((y_test - predictions)^2)
-  
-  return(list(time = time, mse=mse_score,y_test=y_test,predictions=predictions))
-}
-
-SoftBart_fun<- function(X_train, y_train, X_test,y_test,num_trees,alpha,beta){
-  train_X <- data.frame(X_train)
-  test_X <- data.frame(X_test)
-  t <- system.time({bart_model <- softbart(X = train_X, Y = y_train, X_test = test_X, hypers = Hypers(train_X, y_train, num_tree = num_trees, gamma = alpha,beta = beta),opts = Opts(num_burn = 200, num_save = 1000, update_tau = TRUE))})
-        #print(t)
-  time <- as.numeric(t["elapsed"])
-  predictions <- bart_model$y_hat_test_mean
-  mse_score <- mean((y_test - predictions)^2)
-  
-  return(list(time = time, mse=mse_score,y_test=y_test,predictions=predictions))
-}
+print(summary)
 
 ```
 
-```{r,results='hide'}
 
-
-BART <- create_method(
-  .method_fun = BART_fun, .name = "BART", 
-  # additional named parameters to pass to .method_fun()
-  num_trees=50,alpha=0.95,beta=2
-)
-dbarts <- create_method(.method_fun = dbarts_fun,.name = "dbarts",
-                        num_trees=50,alpha=0.95,beta=2)
-bartMachine <- create_method(.method_fun = bartMachine_fun,.name = "bartMachine",
-                        num_trees=50,alpha=0.95,beta=2)
-SoftBart <- create_method(.method_fun = SoftBart_fun,.name = "SoftBart",
-                        num_trees=50,alpha=0.95,beta=2)
-# Create experiment
-experiment <- create_experiment(name = "Test Experiment") %>%
-  add_dgp(linear_dgp) %>%
-  add_method(dbarts) %>%
-  add_method(BART) %>%
-  add_method(bartMachine) %>%
-  add_method(SoftBart) %>%
-  add_evaluator(pred_err)
-
-
-  
-results <- run_experiment(experiment, n_reps = 4, save = TRUE)
-
-# Render automated documentation and view results
-#render_docs(experiment)
-```
 
 
 
