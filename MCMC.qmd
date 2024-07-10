@@ -1,0 +1,89 @@
+---
+title: "test for MCMC"
+format: pdf
+editor: visual
+---
+
+## 
+
+```{r}
+#| message: FALSE
+#| echo: FALSE
+library(simChef)
+library(dplyr)
+library(bartMachine)
+library(dbarts)
+library(SoftBart)
+library(BART)
+library(e1071)
+library(bench)
+library(randomForest)
+library(caret)
+```
+
+```{r}
+data(benchmark_datasets)
+```
+```{r}
+set.seed(316)
+cancer <- read.csv("C:/Users/pyk/Desktop/nus/RA/project/imodels-data-master/data_cleaned/breast_cancer.csv")
+x <- boston[,-ncol(boston)]
+y <- boston[,ncol(boston)]
+
+data(benchmark_datasets)
+
+train_indices <- createDataPartition(y, p = 0.8, list = FALSE)
+train_x <- x[train_indices, ]
+test_x <- x[-train_indices, ]
+train_y <- y[train_indices]
+test_y <- y[-train_indices]
+
+
+```
+
+```{r}
+bart_model <- bartMachine(
+  X = train_x,
+  y = train_y,
+  mh_prob_steps = c(0.5,0.5,0)
+  )
+pred <- predict(bart_model,test_x)
+bart_model1 <- bartMachine(
+  X = train_x,
+  y = train_y,
+  mh_prob_steps = c(0.25,0.25,0.5)
+  )
+pred1 <- predict(bart_model1,test_x)
+bart_model2 <- bartMachine(train_x,train_y)
+pred2 <- predict(bart_model2,test_x)
+```
+
+
+```{r}
+mse <- mean((test_y - pred)^2)
+mse1 <- mean((test_y - pred1)^2)
+mse2 <- mean((test_y - pred2)^2)
+print(mse)
+print(mse1)
+print(mse2)
+
+```
+
+
+```{r}
+dbart <- bart(train_x,train_y,test_x,proposalprobs = c(0.25,0.25,0.4,0.1))
+pred <- colMeans(dbart$yhat.test)
+mse_d <- mean((test_y - pred)^2)
+
+dbart1 <- bart(train_x,train_y,test_x,proposalprobs = c(0.5,0.5,0,0))
+pred1 <- colMeans(dbart1$yhat.test)
+mse_d1 <- mean((test_y - pred1)^2)
+
+dbart2 <- bart(train_x,train_y,test_x)
+pred2 <- colMeans(dbart2$yhat.test)
+mse_d2 <- mean((test_y - pred2)^2)
+
+print(mse_d)
+print(mse_d1)
+print(mse_d2)
+```

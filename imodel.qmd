@@ -1,0 +1,232 @@
+---
+title: "imodel_dataset"
+format: pdf
+editor: visual
+---
+
+---
+title: "synthetic datasets"
+format: pdf
+editor: visual
+---
+
+```{r}
+#| message: FALSE
+#| echo: FALSE
+library(simChef)
+library(dplyr)
+library(bartMachine)
+library(dbarts)
+library(SoftBart)
+library(BART)
+library(e1071)
+library(bench)
+library(randomForest)
+library(caret)
+```
+## create dataset
+
+```{r}
+linear_dgp_fun <- function(n_train, n_test, p, beta, noise_sd) {
+  n <- n_train + n_test
+  X <- matrix(rnorm(n * p), nrow = n, ncol = p)
+  y <- X %*% beta + rnorm(n, sd = noise_sd)
+  data_list <- list(
+    X_train = X[1:n_train, , drop = FALSE],
+    y_train = y[1:n_train],
+    X_test = X[(n_train + 1):n, , drop = FALSE],
+    y_test = y[(n_train + 1):n]
+  )
+  return(data_list)
+}
+linear_dgp <- create_dgp(
+  .dgp_fun = linear_dgp_fun, .name = "Linear DGP",
+  # additional named parameters to pass to .dgp_fun()
+  n_train = 350, n_test = 120, p = 4, beta = c(1,2,1.5,3), noise_sd = 1
+)
+
+dataset_dgp_fun <- function(datasetname){
+  
+  address <- "C:/Users/pyk/Desktop/nus/RA/project/imodels-data-master/data_cleaned/"
+  file <- paste0(datasetname,".csv")
+  file_path <- paste0(address,file)
+  df <- read.csv(file_path)
+  x <- df[, -ncol(df)]
+  y <- df[, ncol(df)]
+
+  train_indices <- createDataPartition(y, p = 0.8, list = FALSE)
+
+  data_list <- list(
+    X_train <- x[train_indices, ],
+    y_train <- y[train_indices],
+    X_test <- x[-train_indices, ],
+    y_test <- y[-train_indices]
+  )
+  return(data_list)
+}
+dataset_dgp <- create_dgp(.dgp_fun = dataset_dgp_fun,.name = 'heart',
+                          datasetname = "heart")
+```
+
+```{r}
+linear_dgp
+```
+
+## build BART model
+```{r}
+BART_fun <- function(X_train, y_train, X_test, y_test, df,k,q) {
+  train_X <- data.frame(X_train)
+  test_X <- data.frame(X_test)
+  t <- bench::mark(fit <- wbart(x.train = train_X,
+                                y.train = y_train,
+                                x.test = test_X,
+                                k = k,
+                                sigdf = df,
+                                sigquant = q
+                                ))
+  time <- mean(t$time[[1]])
+  predictions <- colMeans(fit$yhat.test)
+  mse_score <- mean((y_test - predictions)^2)
+  
+  return(list(time = time, mse=mse_score))
+}
+
+dbarts_fun <- function(X_train, y_train, X_test, y_test, df,k,q){
+  train_X <- data.frame(X_train)
+  test_X <- data.frame(X_test)
+  t <- bench::mark(bart_model <- bart(x.train = train_X,
+                                       y.train = y_train,
+                                       x.test = test_X,
+                                       k = k,
+                                       sigdf = df,
+                                       sigquant = q))
+  time <- mean(t$time[[1]])
+  predictions <- colMeans(bart_model$yhat.test)
+  mse_score <- mean((y_test - predictions)^2)
+  
+  return(list(time = time, mse=mse_score))
+}
+
+bartMachine_fun <- function(X_train, y_train, X_test,y_test,df,k,q){
+  train_X <- data.frame(X_train)
+  test_X <- data.frame(X_test)
+  t <- bench::mark(bart_model <- bartMachine(
+          X = train_X,
+          y = y_train,
+          k = k,
+          nu = df,
+          q=q))
+        # The value of calculating the time required for modeling
+  time <- mean(t$time[[1]])
+  predictions <- predict(bart_model,test_X,type = "prob")
+  mse_score <- mean((y_test - predictions)^2)
+  
+  return(list(time = time, mse=mse_score))
+}
+
+SoftBart_fun<- function(X_train, y_train, X_test,y_test,num_trees,alpha,beta){
+  train_X <- data.frame(X_train)
+  test_X <- data.frame(X_test)
+  t <-  bench::mark({bart_model <- softbart(X = train_X, Y = y_train, X_test = test_X, hypers = Hypers(train_X, y_train, num_tree = num_trees, gamma = alpha,beta = beta),opts = Opts(num_burn = 200, num_save = 1000, update_tau = TRUE))})
+        #print(t)
+  time <- mean(t$time[[1]])
+  predictions <- bart_model$y_hat_test_mean
+  mse_score <- mean((y_test - predictions)^2)
+  
+  return(list(time = time, mse=mse_score))
+}
+RF_fun <- function(X_train, y_train, X_test,y_test){
+  train_X <- data.frame(X_train)
+  test_X <- data.frame(X_test)
+  t <- bench::mark({rf_model <- randomForest(x=train_X, y=y_train)})
+  time <- mean(t$time[[1]])
+  predictions <- predict(rf_model, test_X)
+  mse_score <- mean((y_test - predictions)^2)
+  return(list(time = time, mse=mse_score))
+}
+```
+## create evaluation
+
+```{r}
+posterior_mse <- function(fit_results,truth_col,estimate_col){
+  y_test = fit_results$truth_col
+  pred = fit_results$estimate_col
+  return(mean((y_test - pred)^2))
+}
+
+pred_err <- create_evaluator(
+  .eval_fun = posterior_mse, .name = 'Posterior MSE',
+  # additional named parameters to pass to .eval_fun()
+  truth_col = "y_test", estimate_col = "predictions"
+) 
+
+```
+
+
+```{r,results='hide'}
+
+
+BART <- create_method(
+  .method_fun = BART_fun, .name = "BART", 
+  # additional named parameters to pass to .method_fun()
+  k=2.5,q=0.95,df=4
+)
+dbarts <- create_method(.method_fun = dbarts_fun,.name = "dbarts",
+                        k=2.5,q=0.95,df=4)
+bartMachine <- create_method(.method_fun = bartMachine_fun,.name = "bartMachine",
+                        k=2.5,q=0.95,df=4)
+SoftBart <- create_method(.method_fun = SoftBart_fun,.name = "SoftBart",
+                        num_trees=50,alpha=0.95,beta=2)
+RF <- create_method(.method_fun = RF_fun,.name = "RandomForest")
+# Create experiment
+experiment <- create_experiment(name = "Test Experiment") %>%
+  add_dgp(linear_dgp) %>%
+  add_dgp(dataset_dgp) %>%
+  add_method(dbarts) %>%
+  add_method(BART) %>%
+  add_method(bartMachine) %>%
+  add_method(SoftBart) %>%
+  add_method(RF)%>%
+  add_evaluator(pred_err)
+
+
+  
+results <- run_experiment(experiment, n_reps = 4, save = TRUE)
+
+# Render automated documentation and view results
+#render_docs(experiment)
+```
+
+```{r}
+result <- results$fit_results
+result
+```
+
+```{r}
+
+result$time_numeric <- as.numeric(result$time)
+
+```
+
+```{r}
+result$Resource <- paste(result$.dgp_name, result$.method_name, sep="_")
+
+# Calculate MSE for each group
+summary <- result %>%
+  group_by(Resource) %>%
+  summarise(
+    Mean_MSE = mean(mse),
+    Var_MSE = sd(mse),
+    Mean_time = mean(time_numeric),
+    Var_time = sd(time_numeric))
+
+print(summary)
+
+```
+
+
+
+
+
+
+
