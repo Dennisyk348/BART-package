@@ -4,15 +4,10 @@ format: pdf
 editor: visual
 ---
 
----
-title: "synthetic datasets"
-format: pdf
-editor: visual
----
-
 ```{r}
 #| message: FALSE
 #| echo: FALSE
+#| warning: FALSE
 library(simChef)
 library(dplyr)
 library(bartMachine)
@@ -23,7 +18,9 @@ library(e1071)
 library(bench)
 library(randomForest)
 library(caret)
+library(ggplot2)
 ```
+
 ## create dataset
 
 ```{r}
@@ -68,11 +65,8 @@ dataset_dgp <- create_dgp(.dgp_fun = dataset_dgp_fun,.name = 'heart',
                           datasetname = "heart")
 ```
 
-```{r}
-linear_dgp
-```
-
 ## build BART model
+
 ```{r}
 BART_fun <- function(X_train, y_train, X_test, y_test, df,k,q) {
   train_X <- data.frame(X_train)
@@ -145,6 +139,7 @@ RF_fun <- function(X_train, y_train, X_test,y_test){
   return(list(time = time, mse=mse_score))
 }
 ```
+
 ## create evaluation
 
 ```{r}
@@ -162,6 +157,7 @@ pred_err <- create_evaluator(
 
 ```
 
+## model fitting
 
 ```{r,results='hide'}
 
@@ -223,10 +219,17 @@ summary <- result %>%
 print(summary)
 
 ```
-
-
-
-
-
-
-
+```{r}
+ggplot(summary, aes(x = Resource, y = Mean_MSE)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  labs(y = "MSE", x = "method")
+```
+```{r}
+ggplot(summary, aes(x = Resource, y = Mean_time)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  labs(y = "time", x = "method")
+```
