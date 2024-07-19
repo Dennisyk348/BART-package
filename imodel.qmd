@@ -25,6 +25,7 @@ library(ggplot2)
 
 ```{r}
 linear_dgp_fun <- function(n_train, n_test, p, beta, noise_sd) {
+  set.seed(123)
   n <- n_train + n_test
   X <- matrix(rnorm(n * p), nrow = n, ncol = p)
   y <- X %*% beta + rnorm(n, sd = noise_sd)
@@ -82,7 +83,11 @@ BART_fun <- function(X_train, y_train, X_test, y_test, df,k,q) {
   predictions <- colMeans(fit$yhat.test)
   mse_score <- mean((y_test - predictions)^2)
   
-  return(list(time = time, mse=mse_score))
+  lower_bounds <- apply(fit$yhat.test, 2, quantile, probs = 0.025)
+  upper_bounds <- apply(fit$yhat.test, 2, quantile, probs = 0.975)
+
+  coverage <- mean(y_test >= lower_bounds & y_test <= upper_bounds)
+  return(list(time = time, mse=mse_score,coverage = coverage))
 }
 
 dbarts_fun <- function(X_train, y_train, X_test, y_test, df,k,q){
@@ -98,7 +103,12 @@ dbarts_fun <- function(X_train, y_train, X_test, y_test, df,k,q){
   predictions <- colMeans(bart_model$yhat.test)
   mse_score <- mean((y_test - predictions)^2)
   
-  return(list(time = time, mse=mse_score))
+  lower_bounds <- apply(bart_model$yhat.test, 2, quantile, probs = 0.025)
+  upper_bounds <- apply(bart_model$yhat.test, 2, quantile, probs = 0.975)
+
+  coverage <- mean(y_test >= lower_bounds & y_test <= upper_bounds)
+  
+  return(list(time = time, mse=mse_score,coverage = coverage))
 }
 
 bartMachine_fun <- function(X_train, y_train, X_test,y_test,df,k,q){
@@ -115,19 +125,27 @@ bartMachine_fun <- function(X_train, y_train, X_test,y_test,df,k,q){
   predictions <- predict(bart_model,test_X,type = "prob")
   mse_score <- mean((y_test - predictions)^2)
   
-  return(list(time = time, mse=mse_score))
+  CI <- calc_credible_intervals(bart_model,test_X)
+  coverage <- mean(y_test >= CI[,1] & y_test <= CI[,2])
+  
+  return(list(time = time, mse=mse_score,coverage = coverage))
 }
 
 SoftBart_fun<- function(X_train, y_train, X_test,y_test,num_trees,alpha,beta){
   train_X <- data.frame(X_train)
   test_X <- data.frame(X_test)
   t <-  bench::mark({bart_model <- softbart(X = train_X, Y = y_train, X_test = test_X, hypers = Hypers(train_X, y_train, num_tree = num_trees, gamma = alpha,beta = beta),opts = Opts(num_burn = 200, num_save = 1000, update_tau = TRUE))})
-        #print(t)
+  
   time <- mean(t$time[[1]])
   predictions <- bart_model$y_hat_test_mean
   mse_score <- mean((y_test - predictions)^2)
   
-  return(list(time = time, mse=mse_score))
+  lower_bounds <- apply(bart_model$y_hat_test, 2, quantile, probs = 0.025)
+  upper_bounds <- apply(bart_model$y_hat_test, 2, quantile, probs = 0.975)
+
+  coverage <- mean(y_test >= lower_bounds & y_test <= upper_bounds)
+  
+  return(list(time = time, mse=mse_score,coverage = coverage))
 }
 RF_fun <- function(X_train, y_train, X_test,y_test){
   train_X <- data.frame(X_train)
@@ -209,27 +227,45 @@ result$Resource <- paste(result$.dgp_name, result$.method_name, sep="_")
 
 # Calculate MSE for each group
 summary <- result %>%
-  group_by(Resource) %>%
+  group_by(result$.dgp_name, result$.method_name) %>%
   summarise(
     Mean_MSE = mean(mse),
     Var_MSE = sd(mse),
     Mean_time = mean(time_numeric),
-    Var_time = sd(time_numeric))
+    Var_time = sd(time_numeric),
+    Mean_coverage=mean(coverage),
+    SD_coverage = sd(coverage),
+    .groups = 'keep')
 
 print(summary)
 
 ```
 ```{r}
-ggplot(summary, aes(x = Resource, y = Mean_MSE)) +
-  geom_bar(stat = "identity", position = "dodge") +
+ggplot(summary, aes(x = `result$.method_name`, y = Mean_MSE
+                    #fill = Category
+                    )) +
+  geom_bar(stat = "identity") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))+
-  labs(y = "MSE", x = "method")
+  
+  labs(y = "MSE", x = "method") +
+  facet_grid(~ `result$.dgp_name`)
 ```
+
+
 ```{r}
-ggplot(summary, aes(x = Resource, y = Mean_time)) +
-  geom_bar(stat = "identity", position = "dodge") +
+ggplot(summary, aes(x = `result$.method_name`, y = Mean_time**(0.1)
+                    #fill = Category
+                    )) +
+  geom_bar(stat = "identity") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))+
-  labs(y = "time", x = "method")
+  
+  labs(y = "time", x = "method") +
+  facet_wrap(~ `result$.dgp_name`)
+
+```
+
+```{r}
+summary$`result$.dgp_name`
 ```
