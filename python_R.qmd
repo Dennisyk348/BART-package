@@ -49,9 +49,12 @@ unnormalize_x <- function(y_train,y_new){
 ## create dataset
 
 ```{r}
-linear_dgp_fun <- function(n_train, n_test, p, beta, noise_sd) {
+linear_dgp_fun <- function(ratio,n, p, noise_sd) {
   set.seed(123)
-  n <- n_train + n_test
+  n_train <- n*ratio
+  beta <-  sample(1:100, p, replace = FALSE)
+  
+  #n <- n_train + n_test
   X <- matrix(rnorm(n * p), nrow = n, ncol = p)
   y <- X %*% beta + rnorm(n, sd = noise_sd)
   data_list <- list(
@@ -65,7 +68,7 @@ linear_dgp_fun <- function(n_train, n_test, p, beta, noise_sd) {
 linear_dgp <- create_dgp(
   .dgp_fun = linear_dgp_fun, .name = "Linear DGP",
   # additional named parameters to pass to .dgp_fun()
-  n_train = 350, n_test = 120, p = 4, beta = c(1,2,1.5,3), noise_sd = 1
+  ratio = 0.8, n = 500, p = 4,  noise_sd = 1
 )
 
 dataset_dgp_fun <- function(datasetname){
@@ -260,7 +263,13 @@ experiment <- create_experiment(name = "Test Experiment") %>%
   add_method(bartMachine) %>%
   add_method(SoftBart) %>%
   add_method(RF)%>%
-  add_method(bartpy2)
+  add_method(bartpy2)%>%
+  add_vary_across(
+    .dgp = "Linear DGP",
+    noise_sd = c(0.1, 0.5, 1, 2),
+    n=c(200,500,1000),
+    p=c(4,6,8)
+  ) 
   #add_evaluator(pred_err)
 
 
