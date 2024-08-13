@@ -121,7 +121,7 @@ BART_fun <- function(X_train, y_train, X_test, y_test, df,k,q) {
 dbarts_fun <- function(X_train, y_train, X_test, y_test, df,k,q){
   train_X <- data.frame(X_train)
   test_X <- data.frame(X_test)
-  t <- bench::mark(bart_model <- bart(x.train = train_X,
+  t <- bench::mark(bart_model <- dbarts::bart(x.train = train_X,
                                        y.train = y_train,
                                        x.test = test_X,
                                        k = k,
@@ -218,28 +218,134 @@ bartpy_fun <- function(X_train, y_train, X_test,y_test){
 
   return(list(time = time, mse=mse_score,coverage = coverage))
 }
+
+stochtree_fun <- function(X_train, y_train, X_test, y_test, q){
+  train_X <- data.frame(X_train)
+  test_X <- data.frame(X_test)
+  t <- bench::mark(bart_model <- stochtree::bart(X_train = train_X,
+                                       y_train = y_train,
+                                       X_test = test_X,
+                                       q = q,
+                                       num_burnin = 100))
+  time <- mean(t$time[[1]])
+  predictions <- rowMeans(bart_model$y_hat_test)
+  mse_score <- mean((y_test - predictions)^2)
+  
+  lower_bounds <- apply(bart_model$y_hat_test, 1, quantile, probs = 0.025)
+  upper_bounds <- apply(bart_model$y_hat_test, 1, quantile, probs = 0.975)
+
+  coverage <- mean(y_test >= lower_bounds & y_test <= upper_bounds)
+  
+  return(list(time = time, mse=mse_score,coverage = coverage))
+}
 ```
 
 ## create evaluation
 
 ```{r}
-posterior_mse <- function(fit_results,truth_col,estimate_col){
-  y_test = fit_results$truth_col
-  pred = fit_results$estimate_col
-  return(mean((y_test - pred)^2))
+plot_mse <- function(fit_results){
+  fit_results$time_numeric <- as.numeric(fit_results$time)
+
+# Calculate MSE for each group
+  summary <- fit_results %>%
+    group_by(fit_results$.dgp_name, fit_results$.method_name,n,p,noise_sd) %>%
+    summarise(
+      Mean_MSE = mean(mse),
+      Var_MSE = sd(mse),
+      Mean_time = mean(time_numeric),
+      Var_time = sd(time_numeric),
+      Mean_coverage=mean(coverage),
+      SD_coverage = sd(coverage),
+      .groups = 'keep')
+  plt <- ggplot(summary, aes(x = `fit_results$.method_name`, y = Mean_MSE
+                    #fill = Category
+                    )) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~n+p+noise_sd)+
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  
+  labs(y = "MSE", x = "method") 
+  facet_grid(~ `fit_results$.dgp_name`)
+  return(plt)
+  }
+
+plot_time <- function(fit_results){
+  fit_results$time_numeric <- as.numeric(fit_results$time)
+
+# Calculate MSE for each group
+  summary <- fit_results %>%
+    group_by(fit_results$.dgp_name, fit_results$.method_name,n,p,noise_sd) %>%
+    summarise(
+      Mean_MSE = mean(mse),
+      Var_MSE = sd(mse),
+      Mean_time = mean(time_numeric),
+      Var_time = sd(time_numeric),
+      Mean_coverage=mean(coverage),
+      SD_coverage = sd(coverage),
+      .groups = 'keep')
+  plt <- ggplot(summary, aes(x = `fit_results$.method_name`, y = Mean_time**(0.1)
+                    #fill = Category
+                    )) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~n+p+noise_sd)+
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  
+  labs(y = "time", x = "method") +
+  facet_wrap(~ `fit_results$.dgp_name`)
+  return(plt)
+  }
+
+plot_coverage <- function(fit_results){
+  fit_results$time_numeric <- as.numeric(fit_results$time)
+
+# Calculate MSE for each group
+  summary <- fit_results %>%
+    group_by(fit_results$.dgp_name, fit_results$.method_name,n,p,noise_sd) %>%
+    summarise(
+      Mean_MSE = mean(mse),
+      Var_MSE = sd(mse),
+      Mean_time = mean(time_numeric),
+      Var_time = sd(time_numeric),
+      Mean_coverage=mean(coverage),
+      SD_coverage = sd(coverage),
+      .groups = 'keep')
+  plt <- ggplot(summary, aes(x = `fit_results$.method_name`, y = Mean_coverage
+                    #fill = Category
+                    )) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~n+p+noise_sd)+
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  
+  labs(y = "coverage", x = "method") +
+  facet_wrap(~ `fit_results$.dgp_name`)
+  return(plt)
 }
 
-pred_err <- create_evaluator(
-  .eval_fun = posterior_mse, .name = 'Posterior MSE',
-  # additional named parameters to pass to .eval_fun()
-  truth_col = "y_test", estimate_col = "predictions"
+coverage_plot <- create_visualizer(
+  .viz_fun = plot_coverage, .name = 'coverage Plot',
+  # additional named parameters to pass to .viz_fun()
+  
+) 
+
+time_plot <- create_visualizer(
+  .viz_fun = plot_time, .name = 'time Plot',
+  # additional named parameters to pass to .viz_fun()
+  
+) 
+mse_plot <- create_visualizer(
+  .viz_fun = plot_mse, .name = 'MSE Plot',
+  # additional named parameters to pass to .viz_fun()
+  
 ) 
 
 ```
 
 ## model fitting
 
-```{r,results='hide'}
+```{r,results='hide',warning=FALSE}
 
 BART <- create_method(
   .method_fun = BART_fun, .name = "BART", 
@@ -254,21 +360,26 @@ SoftBart <- create_method(.method_fun = SoftBart_fun,.name = "SoftBart",
                         num_trees=50,alpha=0.95,beta=2)
 RF <- create_method(.method_fun = RF_fun,.name = "RandomForest")
 bartpy2 <- create_method(.method_fun = bartpy_fun,.name = "bartpy")
+stochtree <- create_method(.method_fun = stochtree_fun, .name = "stochtree",q=0.95)
 # Create experiment
 experiment <- create_experiment(name = "Test Experiment") %>%
   add_dgp(linear_dgp) %>%
-  add_dgp(dataset_dgp) %>%
+  #add_dgp(dataset_dgp) %>%
   add_method(dbarts) %>%
   add_method(BART) %>%
   add_method(bartMachine) %>%
   add_method(SoftBart) %>%
   add_method(RF)%>%
   add_method(bartpy2)%>%
+  add_method(stochtree)%>%
+  add_visualizer(mse_plot)%>%
+  add_visualizer(time_plot)%>%
+  add_visualizer(coverage_plot)%>%
   add_vary_across(
     .dgp = "Linear DGP",
-    noise_sd = c(0.1, 0.5, 1, 2),
-    n=c(200,500,1000),
-    p=c(4,6,8)
+    noise_sd = c(0.1, 0.5),
+    n=c(200),
+    p=c(4,6)
   ) 
   #add_evaluator(pred_err)
 
@@ -284,19 +395,17 @@ results <- run_experiment(experiment, n_reps = 4, save = TRUE)
 result <- results$fit_results
 result
 ```
+```{r}
+results$viz_results
+```
 
 ```{r}
 
 result$time_numeric <- as.numeric(result$time)
 
-```
-
-```{r}
-result$Resource <- paste(result$.dgp_name, result$.method_name, sep="_")
-
 # Calculate MSE for each group
 summary <- result %>%
-  group_by(result$.dgp_name, result$.method_name) %>%
+  group_by(result$.dgp_name, result$.method_name,n,p,noise_sd) %>%
   summarise(
     Mean_MSE = mean(mse),
     Var_MSE = sd(mse),
@@ -309,16 +418,20 @@ summary <- result %>%
 print(summary)
 
 ```
+
+
 ```{r}
-ggplot(summary, aes(x = `result$.method_name`, y = Mean_MSE
+plt <- ggplot(summary, aes(x = `result$.method_name`, y = Mean_MSE
                     #fill = Category
                     )) +
   geom_bar(stat = "identity") +
+  facet_wrap(~n+p+noise_sd)+
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))+
   
-  labs(y = "MSE", x = "method") +
+  labs(y = "MSE", x = "method") 
   facet_grid(~ `result$.dgp_name`)
+plt
 ```
 
 
@@ -347,3 +460,5 @@ ggplot(summary, aes(x = `result$.method_name`, y = Mean_coverage
   facet_wrap(~ `result$.dgp_name`)
 
 ```
+
+
