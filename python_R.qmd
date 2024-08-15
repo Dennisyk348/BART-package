@@ -22,6 +22,7 @@ library(randomForest)
 library(caret)
 library(ggplot2)
 library(reticulate)
+library(xgboost)
 ```
 
 
@@ -239,6 +240,15 @@ stochtree_fun <- function(X_train, y_train, X_test, y_test, q){
   
   return(list(time = time, mse=mse_score,coverage = coverage))
 }
+xgb_fun <- function(X_train, y_train, X_test,y_test){
+  train_X <- data.frame(X_train)
+  test_X <- data.frame(X_test)
+  t <- bench::mark({xgb_model <- xgboost(data=as.matrix(train_X), label =y_train,nrounds = 100)})
+  time <- mean(t$time[[1]])
+  predictions <- predict(xgb_model, as.matrix(test_X))
+  mse_score <- mean((y_test - predictions)^2)
+  return(list(time = time, mse=mse_score))
+}
 ```
 
 ## create evaluation
@@ -351,6 +361,7 @@ SoftBart <- create_method(.method_fun = SoftBart_fun,.name = "SoftBart",
 RF <- create_method(.method_fun = RF_fun,.name = "RandomForest")
 bartpy2 <- create_method(.method_fun = bartpy_fun,.name = "bartpy")
 stochtree <- create_method(.method_fun = stochtree_fun, .name = "stochtree",q=0.95)
+XGB <- create_method(.method_fun = xgb_fun, .name = "XGBoost")
 # Create experiment
 experiment <- create_experiment(name = "Test Experiment") %>%
   add_dgp(linear_dgp) %>%
@@ -362,6 +373,7 @@ experiment <- create_experiment(name = "Test Experiment") %>%
   add_method(RF)%>%
   add_method(bartpy2)%>%
   add_method(stochtree)%>%
+  add_method(XGB)%>%
   add_visualizer(mse_plot)%>%
   add_visualizer(time_plot)%>%
   add_visualizer(coverage_plot)%>%
