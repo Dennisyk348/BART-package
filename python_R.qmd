@@ -11,6 +11,7 @@ editor: visual
 #| warning: FALSE
 library(simChef)
 library(dplyr)
+library(stochtree)
 library(bartMachine)
 library(dbarts)
 library(SoftBart)
@@ -29,7 +30,7 @@ library(reticulate)
 ```{r}
 use_condaenv("final")
 bartpy <- import("bartpy2.sklearnmodel")
-time_py <- import("time")
+#time_py <- import("time")
 numpy <- import("numpy")
 
 # unnormalize function from [-0.5,0.5]
@@ -252,21 +253,18 @@ plot_mse <- function(fit_results){
     summarise(
       Mean_MSE = mean(mse),
       Var_MSE = sd(mse),
-      Mean_time = mean(time_numeric),
-      Var_time = sd(time_numeric),
-      Mean_coverage=mean(coverage),
-      SD_coverage = sd(coverage),
+      
       .groups = 'keep')
   plt <- ggplot(summary, aes(x = `fit_results$.method_name`, y = Mean_MSE
                     #fill = Category
                     )) +
-  geom_bar(stat = "identity") +
-  facet_wrap(~n+p+noise_sd)+
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+    geom_bar(stat = "identity") +
+    facet_grid(~n+p+noise_sd)+
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))+
   
-  labs(y = "MSE", x = "method") 
-  facet_grid(~ `fit_results$.dgp_name`)
+    labs(y = "MSE", x = "method") 
+    facet_wrap(~ `fit_results$.dgp_name`)
   return(plt)
   }
 
@@ -274,26 +272,23 @@ plot_time <- function(fit_results){
   fit_results$time_numeric <- as.numeric(fit_results$time)
 
 # Calculate MSE for each group
-  summary <- fit_results %>%
+  summary <-  fit_results %>%
     group_by(fit_results$.dgp_name, fit_results$.method_name,n,p,noise_sd) %>%
     summarise(
-      Mean_MSE = mean(mse),
-      Var_MSE = sd(mse),
       Mean_time = mean(time_numeric),
       Var_time = sd(time_numeric),
-      Mean_coverage=mean(coverage),
-      SD_coverage = sd(coverage),
-      .groups = 'keep')
-  plt <- ggplot(summary, aes(x = `fit_results$.method_name`, y = Mean_time**(0.1)
+      )
+  
+  plt <- ggplot(summary, aes(x = `fit_results$.method_name`, y = Mean_time
                     #fill = Category
                     )) +
-  geom_bar(stat = "identity") +
-  facet_wrap(~n+p+noise_sd)+
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
-  
-  labs(y = "time", x = "method") +
-  facet_wrap(~ `fit_results$.dgp_name`)
+    geom_bar(stat = "identity") +
+    
+    facet_wrap(~n+p+noise_sd) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+    labs(y = "time", x = "method") 
+    facet_wrap(~ `fit_results$.dgp_name`)
   return(plt)
   }
 
@@ -301,26 +296,21 @@ plot_coverage <- function(fit_results){
   fit_results$time_numeric <- as.numeric(fit_results$time)
 
 # Calculate MSE for each group
-  summary <- fit_results %>%
+    summary <- fit_results %>%
     group_by(fit_results$.dgp_name, fit_results$.method_name,n,p,noise_sd) %>%
     summarise(
-      Mean_MSE = mean(mse),
-      Var_MSE = sd(mse),
-      Mean_time = mean(time_numeric),
-      Var_time = sd(time_numeric),
+      
       Mean_coverage=mean(coverage),
-      SD_coverage = sd(coverage),
-      .groups = 'keep')
-  plt <- ggplot(summary, aes(x = `fit_results$.method_name`, y = Mean_coverage
-                    #fill = Category
-                    )) +
-  geom_bar(stat = "identity") +
-  facet_wrap(~n+p+noise_sd)+
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
-  
-  labs(y = "coverage", x = "method") +
-  facet_wrap(~ `fit_results$.dgp_name`)
+      SD_coverage = sd(coverage))
+    
+  plt <- ggplot(summary, aes(x = `fit_results$.method_name`, y = Mean_coverage)) +
+    geom_bar(stat = "identity") +
+    
+    facet_grid(~n+p+noise_sd)+
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+    labs(y = "coverage", x = "method") 
+    facet_wrap(~ `fit_results$.dgp_name`)
   return(plt)
 }
 
@@ -436,16 +426,17 @@ plt
 
 
 ```{r}
-ggplot(summary, aes(x = `result$.method_name`, y = Mean_time**(0.1)
+plt <- ggplot(summary, aes(x = `result$.method_name`, y = Mean_time**(0.1)
                     #fill = Category
                     )) +
   geom_bar(stat = "identity") +
+  facet_wrap(~n+p+noise_sd)+
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))+
   
-  labs(y = "time", x = "method") +
-  facet_wrap(~ `result$.dgp_name`)
-
+  labs(y = "MSE", x = "method") 
+  facet_grid(~ `result$.dgp_name`)
+plt
 ```
 
 ```{r}
@@ -454,10 +445,12 @@ ggplot(summary, aes(x = `result$.method_name`, y = Mean_coverage
                     )) +
   geom_bar(stat = "identity") +
   theme_minimal() +
+  facet_grid(~n+p+noise_sd)+
+  #theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))+
   
-  labs(y = "coverage", x = "method") +
-  facet_wrap(~ `result$.dgp_name`)
+  labs(y = "MSE", x = "method") 
+  facet_grid(~ `result$.dgp_name`)
 
 ```
 
