@@ -4,7 +4,6 @@ format: pdf
 editor: visual
 ---
 
-
 ```{r}
 #| message: FALSE
 #| echo: FALSE
@@ -24,7 +23,6 @@ library(ggplot2)
 library(reticulate)
 library(xgboost)
 ```
-
 
 ## python environment setting
 
@@ -99,28 +97,36 @@ dataset_dgp <- create_dgp(.dgp_fun = dataset_dgp_fun,.name = 'heart',
 ## build BART model
 
 ```{r}
-BART_fun <- function(X_train, y_train, X_test, y_test, df,k,q) {
+BART_fun <- function(X_train, y_train, X_test, y_test, df,k,q,nchain,budget) {
   train_X <- data.frame(X_train)
   test_X <- data.frame(X_test)
-  t <- bench::mark(fit <- wbart(x.train = train_X,
+  time <- 0
+  posterior <- data.frame()
+  for (i in 1:nchain) {
+    t <- bench::mark(fit <- wbart(x.train = train_X,
                                 y.train = y_train,
                                 x.test = test_X,
                                 k = k,
                                 sigdf = df,
-                                sigquant = q
+                                sigquant = q,
+                                ndpost = budget/nchain
                                 ))
-  time <- mean(t$time[[1]])
-  predictions <- colMeans(fit$yhat.test)
+    time <- time+mean(t$time[[1]])
+    posterior <- rbind(posterior, fit$yhat.test)
+  }
+
+  #predictions <- colMeans(fit$yhat.test)
+  predictions <- colMeans(posterior)
   mse_score <- mean((y_test - predictions)^2)
   
-  lower_bounds <- apply(fit$yhat.test, 2, quantile, probs = 0.025)
-  upper_bounds <- apply(fit$yhat.test, 2, quantile, probs = 0.975)
+  lower_bounds <- apply(posterior, 2, quantile, probs = 0.025)
+  upper_bounds <- apply(posterior, 2, quantile, probs = 0.975)
 
   coverage <- mean(y_test >= lower_bounds & y_test <= upper_bounds)
   return(list(time = time, mse=mse_score,coverage = coverage))
 }
 
-dbarts_fun <- function(X_train, y_train, X_test, y_test, df,k,q){
+dbarts_fun <- function(X_train, y_train, X_test, y_test, df,k,q,nchain,budget){
   train_X <- data.frame(X_train)
   test_X <- data.frame(X_test)
   t <- bench::mark(bart_model <- dbarts::bart(x.train = train_X,
@@ -128,7 +134,9 @@ dbarts_fun <- function(X_train, y_train, X_test, y_test, df,k,q){
                                        x.test = test_X,
                                        k = k,
                                        sigdf = df,
-                                       sigquant = q))
+                                       sigquant = q,
+                                       nchain = nchain,
+                                       ndpost = budget))
   time <- mean(t$time[[1]])
   predictions <- colMeans(bart_model$yhat.test)
   mse_score <- mean((y_test - predictions)^2)
@@ -141,22 +149,33 @@ dbarts_fun <- function(X_train, y_train, X_test, y_test, df,k,q){
   return(list(time = time, mse=mse_score,coverage = coverage))
 }
 
-bartMachine_fun <- function(X_train, y_train, X_test,y_test,df,k,q){
+bartMachine_fun <- function(X_train, y_train, X_test,y_test,df,k,q,nchain,budget){
   train_X <- data.frame(X_train)
   test_X <- data.frame(X_test)
+  posterior <- data.frame()
+  time <- 0
+  CI <-  matrix(0, nrow = nrow(test_X), ncol = 2)
+  ndpost <- budget/nchain
+  
   t <- bench::mark(bart_model <- bartMachine(
-          X = train_X,
-          y = y_train,
-          k = k,
-          nu = df,
-          q=q))
+        X = train_X,
+        y = y_train,
+        k = k,
+        nu = df,
+        q=q,
+        num_burn_in = 100,
+        num_iterations_after_burn_in = ndpost))
         # The value of calculating the time required for modeling
-  time <- mean(t$time[[1]])
-  predictions <- predict(bart_model,test_X,type = "prob")
+  time <- time+mean(t$time[[1]])
+  posterior <- rbind(posterior,predict(bart_model,test_X,type = "prob"))
+  CI <- CI+calc_credible_intervals(bart_model,test_X)
+  
+  predictions <- colMeans(posterior)
+  #predictions <- predict(bart_model,test_X,type = "prob")
   mse_score <- mean((y_test - predictions)^2)
   
-  CI <- calc_credible_intervals(bart_model,test_X)
-  coverage <- mean(y_test >= CI[,1] & y_test <= CI[,2])
+  #CI <- calc_credible_intervals(bart_model,test_X)
+  coverage <- mean(y_test >= CI[,1]/nchain & y_test <= CI[,2]/nchain)
   
   return(list(time = time, mse=mse_score,coverage = coverage))
 }
@@ -164,7 +183,7 @@ bartMachine_fun <- function(X_train, y_train, X_test,y_test,df,k,q){
 SoftBart_fun<- function(X_train, y_train, X_test,y_test,num_trees,alpha,beta){
   train_X <- data.frame(X_train)
   test_X <- data.frame(X_test)
-  t <-  bench::mark({bart_model <- softbart(X = train_X, Y = y_train, X_test = test_X, hypers = Hypers(train_X, y_train, num_tree = num_trees, gamma = alpha,beta = beta),opts = Opts(num_burn = 200, num_save = 1000, update_tau = TRUE))})
+  t <-  bench::mark({bart_model <- softbart(X = train_X, Y = y_train, X_test = test_X, hypers = Hypers(train_X, y_train, num_tree = num_trees, gamma = alpha,beta = beta),opts = Opts(num_burn = 100, num_save = 1000, update_tau = TRUE))})
   
   time <- mean(t$time[[1]])
   predictions <- bart_model$y_hat_test_mean
@@ -221,20 +240,26 @@ bartpy_fun <- function(X_train, y_train, X_test,y_test){
   return(list(time = time, mse=mse_score,coverage = coverage))
 }
 
-stochtree_fun <- function(X_train, y_train, X_test, y_test, q){
+stochtree_fun <- function(X_train, y_train, X_test, y_test, q,nchain,budget){
   train_X <- data.frame(X_train)
   test_X <- data.frame(X_test)
-  t <- bench::mark(bart_model <- stochtree::bart(X_train = train_X,
+  posterior <- matrix(0, nrow = nrow(test_X), ncol = 1)
+  time <- 0
+  for (i in 1:nchain) {
+    t <- bench::mark(bart_model <- stochtree::bart(X_train = train_X,
                                        y_train = y_train,
                                        X_test = test_X,
                                        q = q,
                                        num_burnin = 100))
-  time <- mean(t$time[[1]])
-  predictions <- rowMeans(bart_model$y_hat_test)
+    time <- time+mean(t$time[[1]])
+    posterior <- cbind(posterior,bart_model$y_hat_test)
+  }
+  posterior <- posterior[,-1]
+  predictions <- rowMeans(posterior)
   mse_score <- mean((y_test - predictions)^2)
   
-  lower_bounds <- apply(bart_model$y_hat_test, 1, quantile, probs = 0.025)
-  upper_bounds <- apply(bart_model$y_hat_test, 1, quantile, probs = 0.975)
+  lower_bounds <- apply(posterior, 1, quantile, probs = 0.025)
+  upper_bounds <- apply(posterior, 1, quantile, probs = 0.975)
 
   coverage <- mean(y_test >= lower_bounds & y_test <= upper_bounds)
   
@@ -259,7 +284,7 @@ plot_mse <- function(fit_results){
 
 # Calculate MSE for each group
   summary <- fit_results %>%
-    group_by(fit_results$.dgp_name, fit_results$.method_name,n,p,noise_sd) %>%
+    group_by(fit_results$.dgp_name, fit_results$.method_name,n,p,noise_sd,nchain) %>%
     summarise(
       Mean_MSE = mean(mse),
       Var_MSE = sd(mse),
@@ -269,7 +294,7 @@ plot_mse <- function(fit_results){
                     #fill = Category
                     )) +
     geom_bar(stat = "identity") +
-    facet_grid(~n+p+noise_sd)+
+    facet_grid(~n+p+noise_sd+nchain)+
     theme_minimal() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))+
   
@@ -283,7 +308,7 @@ plot_time <- function(fit_results){
 
 # Calculate MSE for each group
   summary <-  fit_results %>%
-    group_by(fit_results$.dgp_name, fit_results$.method_name,n,p,noise_sd) %>%
+    group_by(fit_results$.dgp_name, fit_results$.method_name,n,p,noise_sd,nchain) %>%
     summarise(
       Mean_time = mean(time_numeric),
       Var_time = sd(time_numeric),
@@ -294,7 +319,7 @@ plot_time <- function(fit_results){
                     )) +
     geom_bar(stat = "identity") +
     
-    facet_wrap(~n+p+noise_sd) +
+    facet_wrap(~n+p+noise_sd+nchain) +
     theme_minimal() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))+
     labs(y = "time", x = "method") 
@@ -307,7 +332,7 @@ plot_coverage <- function(fit_results){
 
 # Calculate MSE for each group
     summary <- fit_results %>%
-    group_by(fit_results$.dgp_name, fit_results$.method_name,n,p,noise_sd) %>%
+    group_by(fit_results$.dgp_name, fit_results$.method_name,n,p,noise_sd,nchain) %>%
     summarise(
       
       Mean_coverage=mean(coverage),
@@ -316,7 +341,7 @@ plot_coverage <- function(fit_results){
   plt <- ggplot(summary, aes(x = `fit_results$.method_name`, y = Mean_coverage)) +
     geom_bar(stat = "identity") +
     
-    facet_grid(~n+p+noise_sd)+
+    facet_grid(~n+p+noise_sd+nchain)+
     theme_minimal() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))+
     labs(y = "coverage", x = "method") 
@@ -349,18 +374,17 @@ mse_plot <- create_visualizer(
 
 BART <- create_method(
   .method_fun = BART_fun, .name = "BART", 
-  # additional named parameters to pass to .method_fun()
-  k=2.5,q=0.95,df=4
+  k=2.5,q=0.95,df=4,nchain = 1,budget=1200
 )
 dbarts <- create_method(.method_fun = dbarts_fun,.name = "dbarts",
-                        k=2.5,q=0.95,df=4)
+                        k=2.5,q=0.95,df=4,nchain = 1,budget=1200)
 bartMachine <- create_method(.method_fun = bartMachine_fun,.name = "bartMachine",
-                        k=2.5,q=0.95,df=4)
+                        k=2.5,q=0.95,df=4,budget=1200)
 SoftBart <- create_method(.method_fun = SoftBart_fun,.name = "SoftBart",
                         num_trees=50,alpha=0.95,beta=2)
 RF <- create_method(.method_fun = RF_fun,.name = "RandomForest")
 bartpy2 <- create_method(.method_fun = bartpy_fun,.name = "bartpy")
-stochtree <- create_method(.method_fun = stochtree_fun, .name = "stochtree",q=0.95)
+stochtree <- create_method(.method_fun = stochtree_fun, .name = "stochtree",q=0.95,budget=1200)
 XGB <- create_method(.method_fun = xgb_fun, .name = "XGBoost")
 # Create experiment
 experiment <- create_experiment(name = "Test Experiment") %>%
@@ -379,15 +403,19 @@ experiment <- create_experiment(name = "Test Experiment") %>%
   add_visualizer(coverage_plot)%>%
   add_vary_across(
     .dgp = "Linear DGP",
-    noise_sd = c(0.1, 0.5),
+    noise_sd = c(0.5),
     n=c(200),
     p=c(4,6)
-  ) 
+  ) %>%
+  add_vary_across(
+    .method = c("BART","dbarts","bartMachine","stochtree"),
+    nchain=c(1,3)
+  )
   #add_evaluator(pred_err)
 
 
   
-results <- run_experiment(experiment, n_reps = 4, save = TRUE)
+results <- run_experiment(experiment, n_reps = 2, save = TRUE)
 
 # Render automated documentation and view results
 #render_docs(experiment)
@@ -395,75 +423,16 @@ results <- run_experiment(experiment, n_reps = 4, save = TRUE)
 
 ```{r}
 result <- results$fit_results
+result$time_numeric <- as.numeric(result$time)
 result
 ```
+
 ```{r}
 results$viz_results
 ```
 
-```{r}
 
-result$time_numeric <- as.numeric(result$time)
 
-# Calculate MSE for each group
-summary <- result %>%
-  group_by(result$.dgp_name, result$.method_name,n,p,noise_sd) %>%
-  summarise(
-    Mean_MSE = mean(mse),
-    Var_MSE = sd(mse),
-    Mean_time = mean(time_numeric),
-    Var_time = sd(time_numeric),
-    Mean_coverage=mean(coverage),
-    SD_coverage = sd(coverage),
-    .groups = 'keep')
-
-print(summary)
 
 ```
-
-
-```{r}
-plt <- ggplot(summary, aes(x = `result$.method_name`, y = Mean_MSE
-                    #fill = Category
-                    )) +
-  geom_bar(stat = "identity") +
-  facet_wrap(~n+p+noise_sd)+
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
-  
-  labs(y = "MSE", x = "method") 
-  facet_grid(~ `result$.dgp_name`)
-plt
-```
-
-
-```{r}
-plt <- ggplot(summary, aes(x = `result$.method_name`, y = Mean_time**(0.1)
-                    #fill = Category
-                    )) +
-  geom_bar(stat = "identity") +
-  facet_wrap(~n+p+noise_sd)+
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
-  
-  labs(y = "MSE", x = "method") 
-  facet_grid(~ `result$.dgp_name`)
-plt
-```
-
-```{r}
-ggplot(summary, aes(x = `result$.method_name`, y = Mean_coverage
-                    #fill = Category
-                    )) +
-  geom_bar(stat = "identity") +
-  theme_minimal() +
-  facet_grid(~n+p+noise_sd)+
-  #theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
-  
-  labs(y = "MSE", x = "method") 
-  facet_grid(~ `result$.dgp_name`)
-
-```
-
 
