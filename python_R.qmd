@@ -207,13 +207,14 @@ RF_fun <- function(X_train, y_train, X_test,y_test){
   return(list(time = time, mse=mse_score))
 }
 
-bartpy_fun <- function(X_train, y_train, X_test,y_test){
+bartpy_fun <- function(X_train, y_train, X_test,y_test,nchain,budget){
   train_x <- numpy$array(X_train)
   train_y <- numpy$array(y_train)
   test_x <- numpy$array(X_test)
   test_y <- numpy$array(y_test)
   
-  bart_model <- bartpy$SklearnModel(n_jobs=1)
+  bart_model <- bartpy$SklearnModel(n_jobs=1,n_chains = as.integer(nchain),
+                                    n_samples = as.integer(budget/nchain) )
   
   #start_time <- time_py$time()
   t <- bench::mark({yk <- bart_model$fit(train_x,train_y)})
@@ -383,7 +384,7 @@ bartMachine <- create_method(.method_fun = bartMachine_fun,.name = "bartMachine"
 SoftBart <- create_method(.method_fun = SoftBart_fun,.name = "SoftBart",
                         num_trees=50,alpha=0.95,beta=2)
 RF <- create_method(.method_fun = RF_fun,.name = "RandomForest")
-bartpy2 <- create_method(.method_fun = bartpy_fun,.name = "bartpy")
+bartpy2 <- create_method(.method_fun = bartpy_fun,.name = "bartpy",budget=1200)
 stochtree <- create_method(.method_fun = stochtree_fun, .name = "stochtree",q=0.95,budget=1200)
 XGB <- create_method(.method_fun = xgb_fun, .name = "XGBoost")
 # Create experiment
@@ -408,7 +409,7 @@ experiment <- create_experiment(name = "Test Experiment") %>%
     p=c(4,6)
   ) %>%
   add_vary_across(
-    .method = c("BART","dbarts","bartMachine","stochtree"),
+    .method = c("BART","dbarts","bartMachine","stochtree","bartpy"),
     nchain=c(1,3)
   )
   #add_evaluator(pred_err)
@@ -429,10 +430,5 @@ result
 
 ```{r}
 results$viz_results
-```
-
-
-
-
 ```
 
